@@ -16,8 +16,10 @@ target("pinyin")
         os.cp("lib/*.so", target:targetdir())
     end)
     --
+--https://github.com/Chaoses-Ib/ib-matcher.git
 target("cli")
     set_kind("binary")
+    set_targetdir("lua/cmp_pinyin/bin")
     add_includedirs("include")
     add_linkdirs("lib")
     add_links("ib_pinyin_c")

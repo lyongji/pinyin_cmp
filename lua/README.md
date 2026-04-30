@@ -21,7 +21,7 @@
 xmake build cli
 ```
 
-编译产物：`build/linux/x86_64/release/cli`（与其同目录须有
+编译产物：`lua/cmp_pinyin/bin/cli`（与其同目录须有
 `libib_pinyin_c.so`，xmake 会自动拷贝）。
 
 ## 安装
@@ -34,12 +34,7 @@ xmake build cli
 {
     'your/cmp_pinyin',   -- 替换为你的路径
     build = 'xmake build cli',
-    config = function()
-        require('cmp_pinyin').setup({
-            cli_path = vim.fn.expand('<sfile>:p:h:h')
-                       .. '/build/linux/x86_64/release/cli',
-        })
-    end,
+    -- cli_path 自动检测，无需手动配置
 }
 ```
 
@@ -76,14 +71,41 @@ require('cmp').setup({
 > nvim-cmp 需要 `cmp_pinyin` 源已注册。该源由 `cmp_pinyin.cmp` 提供，
 > 插件自动注册。
 
-### 手动安装
+### Neovim 0.12 原生包管理
 
-将 `lua/` 目录加入 Neovim 的 `runtimepath`，然后：
+Neovim 0.12 内置包管理器，无需第三方插件管理器。
+
+```bash
+# 1. 克隆到 pack 目录
+git clone https://github.com/<用户名>/cmp_pinyin.git \
+    ~/.local/share/nvim/site/pack/pinyin/start/cmp_pinyin
+
+# 2. 编译 CLI
+cd ~/.local/share/nvim/site/pack/pinyin/start/cmp_pinyin
+xmake build cli
+```
+
+然后在 `init.lua` 中配置：
 
 ```lua
-require('cmp_pinyin').setup({
-    cli_path = '/absolute/path/to/build/linux/x86_64/release/cli',
-})
+-- cli_path 自动检测，直接配置补全源即可
+-- 如需手动覆盖：require('cmp_pinyin').setup({ cli_path = '...' })
+```
+
+### 手动安装
+
+将仓库克隆到任意位置，编译后将 `lua/` 加入 `runtimepath`：
+
+```bash
+git clone <repo-url> /path/to/cmp_pinyin
+cd /path/to/cmp_pinyin
+xmake build cli
+```
+
+```lua
+-- init.lua
+vim.opt.runtimepath:prepend('/path/to/cmp_pinyin/lua')
+-- cli_path 自动检测，通常无需配置
 ```
 
 ## 可配置项
@@ -91,8 +113,8 @@ require('cmp_pinyin').setup({
 ```lua
 require('cmp_pinyin').setup({
 
-    -- CLI 可执行文件路径（必填，无默认值）
-    cli_path = '/path/to/cli',
+    -- CLI 可执行文件路径（自动检测，通常无需设置）
+    cli_path = nil,              -- 默认自动定位到 lua/cmp_pinyin/bin/cli
 
     -- 最小查询长度：拼音字母数少于此值时不触发补全
     min_query_len = 2,           -- 默认 2
@@ -145,8 +167,8 @@ CLI 会按数组顺序尝试每种方案，命中任意一种即返回结果。
 **CLI 测试（Python）**：
 
 ```bash
-python test.py                        # 内置测试集
-python test.py build/linux/x86_64/release/cli   # 指定 CLI
+python test.py                        # 内置测试集，自动使用 lua/cmp_pinyin/bin/cli
+python test.py lua/cmp_pinyin/bin/cli # 指定 CLI
 ```
 
 **插件测试（Neovim）**：
@@ -155,7 +177,7 @@ python test.py build/linux/x86_64/release/cli   # 指定 CLI
 :luafile test/test_plugin.lua
 ```
 
-> 需要先编译 CLI，并确保 `build/linux/x86_64/release/cli` 存在。
+> 需要先编译 CLI（`xmake build cli`），确保 `lua/cmp_pinyin/bin/cli` 存在。
 
 ## 文件结构
 
@@ -164,4 +186,5 @@ lua/cmp_pinyin/
   init.lua    — 核心模块（setup / collect_candidates / CLI 调用）
   blink.lua   — blink.cmp provider (get_completions)
   cmp.lua     — nvim-cmp source (complete / resolve / execute)
+  bin/        — 编译产物（xmake build 生成，gitignore）
 ```

@@ -1,8 +1,15 @@
 local M = {}
 
+-- Auto-detect CLI path relative to this module -------------------------
+local function default_cli_path()
+    local source = debug.getinfo(1, 'S').source:gsub('^@', '')
+    -- source: .../lua/cmp_pinyin/init.lua
+    return vim.fn.fnamemodify(source, ':h') .. '/bin/cli'
+end
+
 -- Default configuration ------------------------------------------------
 M.config = {
-    cli_path = nil,                     -- path to pinyin-cli binary (REQUIRED)
+    cli_path = default_cli_path(),          -- auto-detected; override in setup() if needed
     min_query_len = 2,                  -- minimum pinyin query length
     notation = { '简拼', '全拼' },        -- pinyin notation(s): 简拼 全拼 带声调全拼 unicode abc双拼 加加双拼 微软双拼 华宇双拼 小鹤双拼 自然码双拼
     max_candidates = 300,               -- max buffer candidates sent to CLI

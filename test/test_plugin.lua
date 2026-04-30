@@ -27,7 +27,7 @@ local project_root = vim.fn.fnamemodify(script_path, ':h:h')
 if project_root == '' or project_root == '.' then
     project_root = vim.fn.getcwd()                     -- fallback
 end
-local cli_path = project_root .. '/build/linux/x86_64/release/cli'
+local cli_path = project_root .. '/lua/cmp_pinyin/bin/cli'
 
 -- 1. Load the module ------------------------------------------
 header('Loading cmp_pinyin')

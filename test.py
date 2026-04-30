@@ -9,7 +9,7 @@
 import subprocess
 import sys
 
-CLI = sys.argv[1] if len(sys.argv) > 1 else "build/linux/x86_64/release/cli"
+CLI = sys.argv[1] if len(sys.argv) > 1 else "lua/cmp_pinyin/bin/cli"
 
 
 def run(query, candidates, notations=("简拼", "全拼")):
