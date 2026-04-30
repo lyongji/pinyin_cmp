@@ -1,0 +1,28 @@
+add_rules("mode.debug", "mode.release")
+
+set_languages("cxx23")
+
+add_requires("spdlog")
+
+target("pinyin")
+    set_kind("binary")
+    add_packages("spdlog")
+    add_includedirs("include")
+    add_linkdirs("lib")
+    add_links("ib_pinyin_c")
+    add_rpathdirs("$ORIGIN")
+    add_files("src/main.cpp", "src/pinyin.cpp")
+    after_build(function (target)
+        os.cp("lib/*.so", target:targetdir())
+    end)
+    --
+target("cli")
+    set_kind("binary")
+    add_includedirs("include")
+    add_linkdirs("lib")
+    add_links("ib_pinyin_c")
+    add_rpathdirs("$ORIGIN")
+    add_files("src/cli.cpp", "src/pinyin.cpp")
+    after_build(function (target)
+        os.cp("lib/*.so", target:targetdir())
+    end)
