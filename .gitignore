@@ -2,4 +2,3 @@
 .claude
 .cache
 build/
-lua/cmp_pinyin/bin/
