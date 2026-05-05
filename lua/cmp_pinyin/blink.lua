@@ -21,10 +21,28 @@ end
 
 -- Resolve LSP CompletionItemKind, with fallback
 local kind_text = 1
+local kind_keyword = 14  -- fallback for identifiers
 local ok, types = pcall(require, 'blink.cmp.types')
 if ok and types.CompletionItemKind then
     kind_text = types.CompletionItemKind.Text
+    kind_keyword = types.CompletionItemKind.Keyword or 14
 end
+
+-- Map LSP SymbolKind → blink CompletionItemKind
+-- LSP: 5=Class 6=Method 9=Constructor 12=Function 13=Variable 14=Constant 22=EnumMember 23=Struct
+local lsp_kind_to_cmp = {
+    [5] = types and types.CompletionItemKind and types.CompletionItemKind.Class or 7,
+    [6] = types and types.CompletionItemKind and types.CompletionItemKind.Method or 2,
+    [9] = types and types.CompletionItemKind and types.CompletionItemKind.Constructor or 4,
+    [12] = types and types.CompletionItemKind and types.CompletionItemKind.Function or 3,
+    [13] = types and types.CompletionItemKind and types.CompletionItemKind.Variable or 6,
+    [14] = types and types.CompletionItemKind and types.CompletionItemKind.Constant or 21,
+    [22] = types and types.CompletionItemKind and types.CompletionItemKind.EnumMember or 20,
+    [23] = types and types.CompletionItemKind and types.CompletionItemKind.Struct or 22,
+}
+
+-- LSP SymbolKind values that represent callable symbols
+local callable_kinds = { [6] = true, [9] = true, [12] = true }  -- Method, Constructor, Function
 
 local M = {}
 
@@ -47,7 +65,18 @@ function M:get_completions(ctx, callback)
     end
 
     local bufnr = ctx.bufnr or vim.api.nvim_get_current_buf()
-    local candidates = cmp_pinyin.collect_candidates(bufnr)
+
+    -- Detect cursor context and choose candidate source
+    local context = cmp_pinyin.get_cursor_context()
+    local candidates
+    if context == 'code' then
+        candidates = cmp_pinyin.collect_candidates(bufnr, { mode = 'code' })
+    elseif context == 'comment' or context == 'string' then
+        candidates = cmp_pinyin.collect_candidates(bufnr, { mode = 'text' })
+    else
+        -- No LSP / unknown context; collect all CJK words
+        candidates = cmp_pinyin.collect_candidates(bufnr, { mode = 'all' })
+    end
 
     if #candidates == 0 then
         dbg('query="' .. query .. '" → no CJK candidates in buffer ' .. bufnr)
@@ -72,19 +101,21 @@ function M:get_completions(ctx, callback)
 
     local items = {}
     for i, m in ipairs(matches) do
+        local info = cmp_pinyin.get_lsp_symbol_info(m.word, bufnr)
+        local lsp_kind = info and info.kind
+        local is_callable = lsp_kind and callable_kinds[lsp_kind]
+
         items[i] = {
             label = m.word,
-            insertText = m.word,
-            -- blink.cmp fuzzy-matches filterText against typed text.
-            -- User types ASCII pinyin but word is Chinese — include
-            -- query in filterText so the fuzzy matcher finds a match.
+            insertText = is_callable and (m.word .. '()') or m.word,
             filterText = query .. ' ' .. m.word,
             sortText = m.word,
-            kind = kind_text,
+            kind = lsp_kind and lsp_kind_to_cmp[lsp_kind]
+                or (context == 'code' and kind_keyword or kind_text),
         }
     end
 
-    dbg('query="' .. query .. '" → ' .. #items .. ' results')
+    dbg('query="' .. query .. '" → ' .. #items .. ' results (context=' .. context .. ')')
     callback({
         items = items,
         is_incomplete_forward = true,
