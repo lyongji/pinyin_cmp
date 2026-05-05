@@ -4,7 +4,8 @@ local M = {}
 local function default_cli_path()
     local source = debug.getinfo(1, 'S').source:gsub('^@', '')
     -- source: .../lua/cmp_pinyin/init.lua
-    return vim.fn.fnamemodify(source, ':h') .. '/bin/cli'
+    local ext = vim.fn.has('win32') == 1 and '.exe' or ''
+    return vim.fn.fnamemodify(source, ':h') .. '/bin/cli' .. ext
 end
 
 -- Default configuration ------------------------------------------------
@@ -13,7 +14,6 @@ M.config = {
     min_query_len = 2,                  -- minimum pinyin query length
     notation = { '简拼', '全拼' },        -- pinyin notation(s): 简拼 全拼 带声调全拼 unicode abc双拼 加加双拼 微软双拼 华宇双拼 小鹤双拼 自然码双拼
     max_candidates = 300,               -- max buffer candidates sent to CLI
-    cli_timeout_ms = 3000,              -- async CLI timeout
 }
 
 -- CJK detection ---------------------------------------------------------
@@ -121,85 +121,6 @@ function M.run_cli_sync(query, candidates)
         return {}
     end
     return parse_cli_output(vim.split(output, '\n'))
-end
-
--- Async CLI (for nvim-cmp / blink.cmp) ----------------------------------
-local active_job_id = nil
-local active_timer_id = nil
-
-local function cancel_active()
-    if active_job_id then
-        pcall(vim.fn.jobstop, active_job_id)
-        active_job_id = nil
-    end
-    if active_timer_id then
-        pcall(vim.fn.timer_stop, active_timer_id)
-        active_timer_id = nil
-    end
-end
-
---- Run CLI asynchronously.  `callback(results)` is called in a vim.schedule
---- context, where `results` is a list of `{ word, score }` sorted by score asc.
-function M.run_cli_async(query, candidates, callback)
-    if #query < M.config.min_query_len or #candidates == 0 then
-        callback({})
-        return
-    end
-
-    cancel_active()
-
-    local cmd = build_cli_cmd(query)
-    local input = table.concat(candidates, '\n')
-    local stdout_lines = {}
-    local completed = false
-
-    active_job_id = vim.fn.jobstart(cmd, {
-        stdout_buffered = true,
-        on_stdout = function(_, data)
-            if data then
-                for _, line in ipairs(data) do
-                    if line ~= '' then
-                        stdout_lines[#stdout_lines + 1] = line
-                    end
-                end
-            end
-        end,
-        on_exit = function(_, code)
-            if completed then return end
-            completed = true
-            active_job_id = nil
-
-            if active_timer_id then
-                pcall(vim.fn.timer_stop, active_timer_id)
-                active_timer_id = nil
-            end
-
-            if code ~= 0 then
-                vim.schedule(function() callback({}) end)
-                return
-            end
-            local results = parse_cli_output(stdout_lines)
-            vim.schedule(function() callback(results) end)
-        end,
-    })
-
-    if active_job_id > 0 then
-        vim.fn.chansend(active_job_id, input)
-        vim.fn.chanclose(active_job_id, 'stdin')
-        active_timer_id = vim.fn.timer_start(
-            M.config.cli_timeout_ms,
-            function()
-                if not completed then
-                    completed = true
-                    cancel_active()
-                    vim.schedule(function() callback({}) end)
-                end
-            end
-        )
-    else
-        active_job_id = nil
-        callback({})
-    end
 end
 
 -- Omnifunc --------------------------------------------------------------

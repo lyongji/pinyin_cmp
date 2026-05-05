@@ -3,14 +3,13 @@
 在 Neovim 中输入拼音时自动补全中文（CJK）词汇。
 
 支持 [blink.cmp](https://github.com/saghen/blink.cmp) 和
-[nvim-cmp](https://github.com/hrsh7th/nvim-cmp)。
 
 ## 依赖项
 
 | 依赖 | 说明 |
 |------|------|
 | Neovim ≥ 0.9 | — |
-| blink.cmp 或 nvim-cmp | 补全框架，二选一 |
+| blink.cmp  | 补全框架 |
 | `libib_pinyin_c.so` | ib_pinyin C 库，运行时动态链接 |
 | `cli` (C++ 可执行文件) | 拼音匹配 CLI，由本项目编译 |
 | `xmake` | 仅编译时需要 |
@@ -57,55 +56,23 @@ require('blink.cmp').setup({
 })
 ```
 
-**nvim-cmp** 用户：
-
-```lua
-require('cmp').setup({
-    sources = {
-        { name = 'pinyin' },   -- 注册为 cmp 源
-        -- … 其他源 …
-    },
-})
-```
-
-> nvim-cmp 需要 `cmp_pinyin` 源已注册。该源由 `cmp_pinyin.cmp` 提供，
-> 插件自动注册。
-
 ### Neovim 0.12 原生包管理
-
-Neovim 0.12 内置包管理器，无需第三方插件管理器。
-
-```bash
-# 1. 克隆到 pack 目录
-git clone https://github.com/<用户名>/cmp_pinyin.git \
-    ~/.local/share/nvim/site/pack/pinyin/start/cmp_pinyin
-
-# 2. 编译 CLI
-cd ~/.local/share/nvim/site/pack/pinyin/start/cmp_pinyin
-xmake build cli
-```
 
 然后在 `init.lua` 中配置：
 
 ```lua
+-- 本地插件：拼音补全
+vim.opt.rtp:prepend("E:/code/pinyin_cmp")
+vim.schedule(function()
+  local ok, mod = pcall(require, 'cmp_pinyin')
+  if ok then
+    mod.setup({ notation = { '0x1', '0x2' } })
+  end
+end)
+
+
 -- cli_path 自动检测，直接配置补全源即可
 -- 如需手动覆盖：require('cmp_pinyin').setup({ cli_path = '...' })
-```
-
-### 手动安装
-
-将仓库克隆到任意位置，编译后将 `lua/` 加入 `runtimepath`：
-
-```bash
-git clone <repo-url> /path/to/cmp_pinyin
-cd /path/to/cmp_pinyin
-xmake build cli
-```
-
-```lua
--- init.lua
-vim.opt.runtimepath:prepend('/path/to/cmp_pinyin/lua')
--- cli_path 自动检测，通常无需配置
 ```
 
 ## 可配置项
