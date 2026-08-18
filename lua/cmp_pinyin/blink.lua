@@ -107,9 +107,31 @@ function M:get_completions(ctx, callback)
         local lsp_kind = info and info.kind
         local is_callable = lsp_kind and callable_kinds[lsp_kind]
 
+        -- 可调用符号用 LSP snippet：参数区作 ${0:...} 占位，接受后光标落在括号内
+        -- （blink 内置引擎展开，配合 <Tab> 跳出参数继续输入）
+        local insertText = m.word
+        local insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText
+        if is_callable then
+            insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet
+            local signature = info and info.signature
+            local open = signature and signature:find('(', 1, true) -- 完整签名含 '函数名(' 前缀
+            if open then
+                local args = signature:sub(open + 1)
+                if args:sub(-1) == ')' then args = args:sub(1, -2) end
+                if #args > 0 then
+                    insertText = m.word .. '(${0:' .. args .. '})'
+                else
+                    insertText = m.word .. '(${0})'
+                end
+            else
+                insertText = m.word .. '(${0})'
+            end
+        end
+
         items[i] = {
             label = m.word,
-            insertText = is_callable and ((info and info.signature) and info.signature or (m.word .. '()')) or m.word,
+            insertText = insertText,
+            insertTextFormat = insertTextFormat,
             filterText = query .. ' ' .. m.word,
             -- score 小 = 更相关；补零使字典序 == 数值序，
             -- 覆盖 blink 默认按 sort_text 排序时丢失 CLI 相关性排名的问题
