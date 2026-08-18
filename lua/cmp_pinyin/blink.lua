@@ -47,6 +47,49 @@ local callable_kinds = { [6] = true, [9] = true, [12] = true }  -- Method, Const
 
 local M = {}
 
+--- 把函数名+参数文本转成带逐个占位符的 LSP snippet：
+--- 函数名(${1:参数1}, ${2:参数2})${0}
+--- 接受后光标落第一个参数，<Tab> 依次跳转，最后 ${0} 停在括号外。
+--- 参数按顶层逗号拆分（嵌套 ()/<>/[] 内的逗号不拆）。
+--- @param name string 函数名
+--- @param args string '(' 与 ')' 之间的原始参数文本，可为空
+--- @return string snippet 文本
+local function 构建函数snippet(name, args)
+    if #args == 0 then
+        return name .. '(${0})'  -- 无参：光标在 () 内
+    end
+
+    -- 按顶层逗号拆分参数
+    local parts = {}
+    local depth = 0
+    local start = 1
+    for i = 1, #args do
+        local c = args:sub(i, i)
+        if c == '(' or c == '<' or c == '[' then
+            depth = depth + 1
+        elseif c == ')' or c == '>' or c == ']' then
+            depth = depth - 1
+        elseif c == ',' and depth == 0 then
+            parts[#parts + 1] = args:sub(start, i - 1)
+            start = i + 1
+        end
+    end
+    parts[#parts + 1] = args:sub(start)
+
+    local placeholders = {}
+    for n, p in ipairs(parts) do
+        p = p:gsub('^%s+', ''):gsub('%s+$', '')
+        if #p > 0 then
+            placeholders[#placeholders + 1] = string.format('${%d:%s}', n, p)
+        end
+    end
+
+    if #placeholders == 0 then
+        return name .. '(${0})'
+    end
+    return name .. '(' .. table.concat(placeholders, ', ') .. ')${0}'
+end
+
 --- blink.cmp calls new(opts) to create a provider instance (v1.x).
 --- The instance inherits get_completions from M.
 function M.new(opts)
@@ -107,8 +150,8 @@ function M:get_completions(ctx, callback)
         local lsp_kind = info and info.kind
         local is_callable = lsp_kind and callable_kinds[lsp_kind]
 
-        -- 可调用符号用 LSP snippet：参数区作 ${0:...} 占位，接受后光标落在括号内
-        -- （blink 内置引擎展开，配合 <Tab> 跳出参数继续输入）
+        -- 可调用符号用 LSP snippet：每个参数一个占位符，接受后光标落第一个参数，
+        -- <Tab> 在参数间跳转，与 LSP/clangd 原生行为一致
         local insertText = m.word
         local insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText
         if is_callable then
@@ -118,11 +161,7 @@ function M:get_completions(ctx, callback)
             if open then
                 local args = signature:sub(open + 1)
                 if args:sub(-1) == ')' then args = args:sub(1, -2) end
-                if #args > 0 then
-                    insertText = m.word .. '(${0:' .. args .. '})'
-                else
-                    insertText = m.word .. '(${0})'
-                end
+                insertText = 构建函数snippet(m.word, args)
             else
                 insertText = m.word .. '(${0})'
             end
