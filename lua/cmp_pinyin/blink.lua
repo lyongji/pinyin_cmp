@@ -89,42 +89,42 @@ function M:get_completions(ctx, callback)
         })
     end
 
-    -- Async CLI：blink 的 get_completions 本就是异步契约，避免主线程阻塞
-    cmp_pinyin.run_cli_async(query, candidates, function(matches)
-        if #matches == 0 then
-            dbg('query="' .. query .. '" → no pinyin match in ' .. #candidates .. ' candidates')
-            return callback({
-                items = {},
-                is_incomplete_forward = true,
-                is_incomplete_backward = true,
-            })
-        end
-
-        local items = {}
-        for i, m in ipairs(matches) do
-            local info = cmp_pinyin.get_lsp_symbol_info(m.word, bufnr)
-            local lsp_kind = info and info.kind
-            local is_callable = lsp_kind and callable_kinds[lsp_kind]
-
-            items[i] = {
-                label = m.word,
-                insertText = is_callable and ((info and info.signature) and info.signature or (m.word .. '()')) or m.word,
-                filterText = query .. ' ' .. m.word,
-                -- score 小 = 更相关；补零使字典序 == 数值序，
-                -- 覆盖 blink 默认按 sort_text 排序时丢失 CLI 相关性排名的问题
-                sortText = string.format('%010d', m.score),
-                kind = lsp_kind and lsp_kind_to_cmp[lsp_kind]
-                    or (context == 'code' and kind_keyword or kind_text),
-            }
-        end
-
-        dbg('query="' .. query .. '" → ' .. #items .. ' results (context=' .. context .. ')')
-        callback({
-            items = items,
+    -- 同步 CLI：每次按键同步完成查询+更新，避免异步空窗被 blink 的 fuzzy
+    -- 过滤闪掉中文候选（CLI 设计目标 <10ms，不阻塞主线程）
+    local matches = cmp_pinyin.run_cli_sync(query, candidates)
+    if #matches == 0 then
+        dbg('query="' .. query .. '" → no pinyin match in ' .. #candidates .. ' candidates')
+        return callback({
+            items = {},
             is_incomplete_forward = true,
             is_incomplete_backward = true,
         })
-    end)
+    end
+
+    local items = {}
+    for i, m in ipairs(matches) do
+        local info = cmp_pinyin.get_lsp_symbol_info(m.word, bufnr)
+        local lsp_kind = info and info.kind
+        local is_callable = lsp_kind and callable_kinds[lsp_kind]
+
+        items[i] = {
+            label = m.word,
+            insertText = is_callable and ((info and info.signature) and info.signature or (m.word .. '()')) or m.word,
+            filterText = query .. ' ' .. m.word,
+            -- score 小 = 更相关；补零使字典序 == 数值序，
+            -- 覆盖 blink 默认按 sort_text 排序时丢失 CLI 相关性排名的问题
+            sortText = string.format('%010d', m.score),
+            kind = lsp_kind and lsp_kind_to_cmp[lsp_kind]
+                or (context == 'code' and kind_keyword or kind_text),
+        }
+    end
+
+    dbg('query="' .. query .. '" → ' .. #items .. ' results (context=' .. context .. ')')
+    callback({
+        items = items,
+        is_incomplete_forward = true,
+        is_incomplete_backward = true,
+    })
 end
 
 return M
