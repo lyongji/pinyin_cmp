@@ -27,7 +27,10 @@ def run(query, candidates, notations=("简拼", "全拼")):
     for line in proc.stdout.strip().split("\n"):
         if "\t" in line:
             word, score = line.split("\t", 1)
-            results.append((word, int(score)))
+            try:
+                results.append((word, int(score)))
+            except ValueError:
+                continue  # 忽略无法解析的输出行
     return results
 
 
@@ -62,6 +65,10 @@ CANDIDATES = [
     "文件内容",
     "打印输出",
     "请求响应",
+    # 双拼多候选韵母测试词（加加: 国=gojw, 华宇: 想象=xdxd, 雄心=xsxb）
+    "国家",
+    "想象",
+    "雄心",
 ]
 
 print("拼音补全 CLI 测试")
@@ -95,6 +102,34 @@ all_pass &= test("混合", "yonghu", CANDIDATES,
 print("\n[边界]")
 all_pass &= test("空结果", "xyz", CANDIDATES, expect_empty=True)
 all_pass &= test("短查询", "a", CANDIDATES, expect_empty=True)
+
+# 双拼测试（多候选韵母按声母选择）
+print("\n[双拼]")
+all_pass &= test("加加双拼 w=ua (go→guo)", "gojw", CANDIDATES,
+                 ("加加双拼",), expect_word="国家")
+all_pass &= test("加加双拼用户 (yshu→yonghu)", "yshu", CANDIDATES,
+                 ("加加双拼",), expect_word="用户管理")
+all_pass &= test("华宇双拼 d=iang (xd→xiang)", "xdxd", CANDIDATES,
+                 ("华宇双拼",), expect_word="想象")
+all_pass &= test("华宇双拼 s=iong (xs→xiong)", "xsxb", CANDIDATES,
+                 ("华宇双拼",), expect_word="雄心")
+
+# 两阶段去重：加加双拼第一阶段(0x20)命中 + 第二阶段转换命中，不应重复输出
+print("\n[去重]")
+results = run("yshu", CANDIDATES, ("加加双拼",))
+words = [w for w, _ in results]
+dedup_ok = len(words) == len(set(words))
+print(f"  {'✓' if dedup_ok else '✗ FAIL'} 加加双拼结果无重复: {len(words)} 条 = {len(set(words))} 唯一")
+all_pass &= dedup_ok
+
+# 非法 --notation
+print("\n[非法输入]")
+proc = subprocess.run([CLI, "--notation", "0xGG", "yh"],
+                      input="\n".join(CANDIDATES),
+                      capture_output=True, text=True)
+bad_ok = proc.returncode != 0
+print(f"  {'✓' if bad_ok else '✗ FAIL'} 0xGG 非零退出码 (实际 {proc.returncode})")
+all_pass &= bad_ok
 
 print(f"\n{'全部通过!' if all_pass else '有失败用例!'}")
 sys.exit(0 if all_pass else 1)

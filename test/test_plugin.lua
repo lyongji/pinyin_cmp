@@ -3,7 +3,7 @@
 --
 -- 前提条件:
 --   1. CLI 已编译: xmake build cli
---   2. 确保 build/linux/x86_64/release/cli 可执行
+--   2. 确保 lua/cmp_pinyin/bin/cli 可执行
 --
 -- 该脚本测试:
 --   1. CLI 能找到且可执行
@@ -132,7 +132,7 @@ local empty_matches = cmp_pinyin.run_cli_sync('a', candidates)
 if #empty_matches == 0 then
     pass('Single-char query returns no results (below min_query_len=2)')
 else
-    pass('Single-char query returned ' .. #empty_matches .. ' results')
+    fail('Single-char query should return no results (below min_query_len=2), got ' .. #empty_matches)
 end
 
 local no_cand_matches = cmp_pinyin.run_cli_sync('hello', {})

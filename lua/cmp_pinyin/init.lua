@@ -26,10 +26,16 @@ function M.has_cjk(s)
 end
 
 -- Candidate cache (per-buffer) ------------------------------------------
-local cache = {}  -- [bufnr] = { tick = changedtick, words = {...} }
+local cache = {}  -- [bufnr] = { tick, words_all / words_code / words_text_nocode }
 
 -- LSP symbols cache (code identifiers) -----------------------------------
-local lsp_cache = {}  -- [bufnr] = { tick = changedtick, ids = {...} }
+-- [bufnr] = { tick, ts = 请求时间戳(ns), ids, kinds }
+local lsp_cache = {}
+local lsp_notified = {}  -- [bufnr] = true，LSP 错误已提示过（避免每次按键刷屏）
+
+-- LSP documentSymbol 节流：打字期间 tick 频繁变化，
+-- 但符号集几乎不变，短时间内复用旧缓存避免同步阻塞
+local LSP_THROTTLE_MS = 500
 
 local function lsp_cache_invalidate(bufnr)
     if bufnr then
@@ -49,8 +55,10 @@ function M.invalidate_cache(bufnr)
 end
 
 local function get_word_pattern()
-    -- Match runs of ASCII word chars + non-ASCII bytes
-    return '[%w_\128-\255]+'
+    -- 匹配 ASCII 词段 或 连续 CJK 主区字符（U+4E00-U+9FFF，每字符 3 字节）。
+    -- 全角标点（U+3000-303F、U+FF00-FFEF）首字节不在 \228-\233 内，
+    -- 自动成为词间分隔，不再产生 “用户。” 类脏候选。
+    return '[%w_]+|[\228-\233][\128-\191][\128-\191]+'
 end
 
 --- Walk LSP DocumentSymbol[] / SymbolInformation[] and extract CJK names + kinds.
@@ -80,8 +88,23 @@ local function collect_lsp_identifiers(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local tick = vim.api.nvim_buf_get_changedtick(bufnr)
 
-    if lsp_cache[bufnr] and lsp_cache[bufnr].tick == tick then
-        return lsp_cache[bufnr].ids
+    local 通知一次 = function(消息)
+        if not lsp_notified[bufnr] then
+            lsp_notified[bufnr] = true
+            vim.notify(消息, vim.log.levels.WARN)
+        end
+    end
+
+    if lsp_cache[bufnr] then
+        local entry = lsp_cache[bufnr]
+        if entry.tick == tick then
+            return entry.ids
+        end
+        -- 节流期内复用旧缓存：打字时符号集几乎不变，避免每次按键同步请求
+        local now = vim.uv.hrtime()
+        if now - entry.ts < LSP_THROTTLE_MS * 1e6 then
+            return entry.ids
+        end
     end
 
     local clients = (vim.lsp.get_clients or vim.lsp.get_active_clients)({ bufnr = bufnr })
@@ -93,8 +116,7 @@ local function collect_lsp_identifiers(bufnr)
     local ok, results = pcall(vim.lsp.buf_request_sync, bufnr,
         'textDocument/documentSymbol', params, 300)
     if not ok then
-        vim.notify('[cmp_pinyin] LSP documentSymbol error: ' .. tostring(results),
-                   vim.log.levels.WARN)
+        通知一次('[cmp_pinyin] LSP documentSymbol error: ' .. tostring(results))
         return {}
     end
     if not results then
@@ -106,8 +128,7 @@ local function collect_lsp_identifiers(bufnr)
     local kinds = {}
     for _, resp in pairs(results) do
         if resp.error then
-            vim.notify('[cmp_pinyin] LSP ' .. (resp.error.message or 'unknown error'),
-                       vim.log.levels.WARN)
+            通知一次('[cmp_pinyin] LSP ' .. (resp.error.message or 'unknown error'))
         elseif resp.result and type(resp.result) == 'table' then
             local ok2, sym_ids = pcall(extract_lsp_symbols, resp.result, seen, kinds)
             if ok2 then
@@ -118,7 +139,7 @@ local function collect_lsp_identifiers(bufnr)
         end
     end
 
-    lsp_cache[bufnr] = { tick = tick, ids = ids, kinds = kinds }
+    lsp_cache[bufnr] = { tick = tick, ts = vim.uv.hrtime(), ids = ids, kinds = kinds }
     return ids
 end
 
@@ -136,8 +157,17 @@ end
 
 --- Detect cursor context without treesitter (LSP candidate-set based fallback).
 --- Uses buffer commentstring and simple quote counting.
+-- 文本型文件类型：正文不应走代码分支（即使挂了 LSP 如 ltex）
+local 文本型文件类型 = {
+    markdown = true, text = true, tex = true, rst = true,
+    pandoc = true, org = true, mail = true, gitcommit = true,
+}
 local function get_cursor_context_heuristic()
     local bufnr = vim.api.nvim_get_current_buf()
+    if 文本型文件类型[vim.bo[bufnr].filetype] then
+        return 'unknown'
+    end
+
     local cursor = vim.api.nvim_win_get_cursor(0)
     local row = cursor[1] - 1
     local col = cursor[2]
@@ -154,24 +184,32 @@ local function get_cursor_context_heuristic()
     end
 
     -- Common block-comment / doc-comment patterns
-    if stripped:match('^%*%s') or stripped:match('^//') or stripped:match('^/#') then
+    -- 含 HTML 注释（commentstring `<!-- %s -->` 去占位后无法精确匹配，直接查 <!--）
+    if stripped:match('^%*%s') or stripped:match('^//') or stripped:match('^/#')
+        or stripped:match('^<!%-%-') then
         return 'comment'
     end
 
-    -- Simple string detection: count unescaped quotes before cursor
+    -- 引号计数 + 行内注释检测（同步扫描，仅统计引号外的标记）
     local in_single, in_double, in_backtick = false, false, false
     local i = 1
     while i <= #before do
         local ch = before:sub(i, i)
-        local prev = i > 1 and before:sub(i - 1, i - 1) or ''
+        local next_ch = i < #before and before:sub(i + 1, i + 1) or ''
         if ch == '\\' then
-            i = i + 1
+            i = i + 1  -- 跳过转义字符
         elseif ch == "'" and not in_double and not in_backtick then
             in_single = not in_single
         elseif ch == '"' and not in_single and not in_backtick then
             in_double = not in_double
         elseif ch == '`' and not in_single and not in_double then
             in_backtick = not in_backtick
+        elseif not in_single and not in_double and not in_backtick then
+            -- 引号外的行注释标记：光标在标记后，必在注释内
+            if (ch == '-' and next_ch == '-') or (ch == '/' and next_ch == '/')
+                or ch == '#' then
+                return 'comment'
+            end
         end
         i = i + 1
     end
@@ -212,6 +250,7 @@ function M.collect_candidates(bufnr, opts)
 
     local words = {}
     local seen = {}
+    local freq = {}  -- 词频统计，用于截断时保留高频短词
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
     -- Collect text words (mode 'text' or 'all')
@@ -219,9 +258,12 @@ function M.collect_candidates(bufnr, opts)
         local pat = get_word_pattern()
         for _, line in ipairs(lines) do
             for word in line:gmatch(pat) do
-                if #word >= 2 and not seen[word] and M.has_cjk(word) then
-                    seen[word] = true
-                    words[#words + 1] = word
+                if #word >= 2 and M.has_cjk(word) then
+                    if not seen[word] then
+                        seen[word] = true
+                        words[#words + 1] = word
+                    end
+                    freq[word] = (freq[word] or 0) + 1
                 end
             end
         end
@@ -254,6 +296,7 @@ function M.collect_candidates(bufnr, opts)
                     if #word >= 2 and not seen[word] and M.has_cjk(word) then
                         seen[word] = true
                         words[#words + 1] = word
+                        freq[word] = (freq[word] or 0) + 1
                     end
                 end
             end
@@ -263,12 +306,17 @@ function M.collect_candidates(bufnr, opts)
                 seen[word] = true
                 words[#words + 1] = word
             end
+            freq[word] = (freq[word] or 0) + 1
         end
     end
 
-    -- Cap for performance: keep longest words first (more meaningful)
+    -- Cap for performance: keep high-frequency words first, then shorter ones
+    -- （词频优先，常用短词不被长词挤掉）
     if #words > M.config.max_candidates then
-        table.sort(words, function(a, b) return #a > #b end)
+        table.sort(words, function(a, b)
+            if freq[a] ~= freq[b] then return freq[a] > freq[b] end
+            return #a < #b
+        end)
         local capped = {}
         for i = 1, M.config.max_candidates do
             capped[i] = words[i]
@@ -345,6 +393,25 @@ function M.run_cli_sync(query, candidates)
     return parse_cli_output(vim.split(output, '\n'))
 end
 
+-- Async CLI (for blink.cmp provider，不阻塞主事件循环)
+function M.run_cli_async(query, candidates, callback)
+    if #query < M.config.min_query_len or #candidates == 0 then
+        callback({})
+        return
+    end
+    local cmd = build_cli_cmd(query)
+    local input = table.concat(candidates, '\n')
+    vim.system(cmd, { text = true, stdin = input, timeout = 1000 }, function(result)
+        if result.code ~= 0 then
+            vim.notify('[cmp_pinyin] CLI error (exit ' .. tostring(result.code) .. ')',
+                       vim.log.levels.WARN)
+            callback({})
+            return
+        end
+        callback(parse_cli_output(vim.split(result.stdout, '\n')))
+    end)
+end
+
 -- Omnifunc --------------------------------------------------------------
 function M.complete(findstart, base)
     if findstart == 1 then
@@ -396,11 +463,12 @@ function M.setup(opts)
     end
 
     -- Invalidate caches when any buffer changes
-    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufWritePost' }, {
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufWritePost', 'BufDelete' }, {
         group = vim.api.nvim_create_augroup('CmpPinyinCache', { clear = true }),
         callback = function(args)
             cache[args.buf] = nil
             lsp_cache[args.buf] = nil
+            lsp_notified[args.buf] = nil
         end,
     })
 end

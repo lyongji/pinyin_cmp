@@ -67,6 +67,7 @@ function M:get_completions(ctx, callback)
     local bufnr = ctx.bufnr or vim.api.nvim_get_current_buf()
 
     -- Detect cursor context and choose candidate source
+    -- （候选收集是内存/正则操作，同步很快；CLI 匹配走异步回调）
     local context = cmp_pinyin.get_cursor_context()
     local candidates
     if context == 'code' then
@@ -87,40 +88,42 @@ function M:get_completions(ctx, callback)
         })
     end
 
-    -- Use sync CLI for reliability; the C++ CLI is fast (<10ms for typical buffers)
-    local matches = cmp_pinyin.run_cli_sync(query, candidates)
+    -- Async CLI：blink 的 get_completions 本就是异步契约，避免主线程阻塞
+    cmp_pinyin.run_cli_async(query, candidates, function(matches)
+        if #matches == 0 then
+            dbg('query="' .. query .. '" → no pinyin match in ' .. #candidates .. ' candidates')
+            return callback({
+                items = {},
+                is_incomplete_forward = true,
+                is_incomplete_backward = true,
+            })
+        end
 
-    if #matches == 0 then
-        dbg('query="' .. query .. '" → no pinyin match in ' .. #candidates .. ' candidates')
-        return callback({
-            items = {},
+        local items = {}
+        for i, m in ipairs(matches) do
+            local info = cmp_pinyin.get_lsp_symbol_info(m.word, bufnr)
+            local lsp_kind = info and info.kind
+            local is_callable = lsp_kind and callable_kinds[lsp_kind]
+
+            items[i] = {
+                label = m.word,
+                insertText = is_callable and (m.word .. '()') or m.word,
+                filterText = query .. ' ' .. m.word,
+                -- score 小 = 更相关；补零使字典序 == 数值序，
+                -- 覆盖 blink 默认按 sort_text 排序时丢失 CLI 相关性排名的问题
+                sortText = string.format('%010d', m.score),
+                kind = lsp_kind and lsp_kind_to_cmp[lsp_kind]
+                    or (context == 'code' and kind_keyword or kind_text),
+            }
+        end
+
+        dbg('query="' .. query .. '" → ' .. #items .. ' results (context=' .. context .. ')')
+        callback({
+            items = items,
             is_incomplete_forward = true,
             is_incomplete_backward = true,
         })
-    end
-
-    local items = {}
-    for i, m in ipairs(matches) do
-        local info = cmp_pinyin.get_lsp_symbol_info(m.word, bufnr)
-        local lsp_kind = info and info.kind
-        local is_callable = lsp_kind and callable_kinds[lsp_kind]
-
-        items[i] = {
-            label = m.word,
-            insertText = is_callable and (m.word .. '()') or m.word,
-            filterText = query .. ' ' .. m.word,
-            sortText = m.word,
-            kind = lsp_kind and lsp_kind_to_cmp[lsp_kind]
-                or (context == 'code' and kind_keyword or kind_text),
-        }
-    end
-
-    dbg('query="' .. query .. '" → ' .. #items .. ' results (context=' .. context .. ')')
-    callback({
-        items = items,
-        is_incomplete_forward = true,
-        is_incomplete_backward = true,
-    })
+    end)
 end
 
 return M
