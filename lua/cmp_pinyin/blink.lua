@@ -3,12 +3,13 @@ local cmp_pinyin = require('cmp_pinyin')
 -- Debug flag: set to false to silence status messages
 local function dbg(msg) end  -- set to vim.notify(...) to debug
 
---- Extract the pinyin query before the cursor (ASCII letters only).
-local function get_query()
-    local line = vim.api.nvim_get_current_line()
-    local col = vim.fn.col('.')            -- 1-indexed cursor column
+--- 提取光标前的拼音查询词（仅 ASCII 字母）。
+--- 使用 blink 传入的 ctx（含 line/cursor，多窗口场景更稳）。
+local function get_query(ctx)
+    local line = ctx and ctx.line or vim.api.nvim_get_current_line()
+    -- cursor: {行(1基), 列(0基)}；无 ctx 时用 col('.')-1（0基列）
+    local end_pos = (ctx and ctx.cursor and ctx.cursor[2]) or (vim.fn.col('.') - 1)
 
-    local end_pos = col - 1
     local start = end_pos
     while start > 0 and line:sub(start, start):match('[%a]') do
         start = start - 1
@@ -54,7 +55,7 @@ end
 
 --- blink.cmp completion provider entry point.
 function M:get_completions(ctx, callback)
-    local query = get_query()
+    local query = get_query(ctx)
 
     if #query < (cmp_pinyin.config.min_query_len or 2) then
         return callback({
@@ -68,7 +69,7 @@ function M:get_completions(ctx, callback)
 
     -- Detect cursor context and choose candidate source
     -- （候选收集是内存/正则操作，同步很快；CLI 匹配走异步回调）
-    local context = cmp_pinyin.get_cursor_context()
+    local context = cmp_pinyin.get_cursor_context(ctx)
     local candidates
     if context == 'code' then
         candidates = cmp_pinyin.collect_candidates(bufnr, { mode = 'code' })
@@ -107,7 +108,7 @@ function M:get_completions(ctx, callback)
 
             items[i] = {
                 label = m.word,
-                insertText = is_callable and (m.word .. '()') or m.word,
+                insertText = is_callable and ((info and info.signature) and info.signature or (m.word .. '()')) or m.word,
                 filterText = query .. ' ' .. m.word,
                 -- score 小 = 更相关；补零使字典序 == 数值序，
                 -- 覆盖 blink 默认按 sort_text 排序时丢失 CLI 相关性排名的问题
