@@ -12,7 +12,7 @@
 ## 依赖项
 
 | 依赖 | 说明 |
-|------|------|
+| ------ | ------ |
 | Neovim ≥ 0.9 | 运行环境 |
 | blink.cmp | 补全框架 |
 | LSP（可选） | 通过 document symbols 提取代码标识符（函数名、变量名、类名等），未安装时回退为全文本匹配 |
@@ -60,6 +60,22 @@ require('blink.cmp').setup({
 
 拼音补全与 LSP 等源并行工作，补全菜单中同时显示 LSP 建议和拼音匹配项。
 
+### 无依赖版本（不需要 blink.cmp）
+
+`blink_nodeps` 是自动回退入口：
+
+| 环境 | 行为 |
+| --- | --- |
+| 已安装 blink.cmp | 自动注册 `pinyin` provider（等价于 `blink.lua`） |
+| 未安装 blink.cmp，有 LSP | omnifunc 路径，候选词来自 LSP documentSymbol |
+| 两者都没有 | omnifunc 路径，纯文本候选词 |
+
+```lua
+require('cmp_pinyin.blink_nodeps').setup({ notation = { '简拼', '全拼' } })
+```
+
+有 blink.cmp 时也可直接在 blink 配置里指定 `module = 'cmp_pinyin.blink_nodeps'`（行为与 `blink.lua` 完全一致）。无 blink 时按 `<C-x><C-o>` 触发补全。
+
 ### Neovim 0.12 原生包管理
 
 ```lua
@@ -105,7 +121,7 @@ require('cmp_pinyin').setup({
 ### 各模式数据来源
 
 | 模式 | 无 LSP | 有 LSP |
-|------|--------|--------|
+| ------ | -------- | -------- |
 | `text` | 正则 `[%w_\128-\255]+` 匹配 | 正则匹配，可选 `exclude_code` 过滤 LSP 标识符 |
 | `code` | `collect_lsp_identifiers()` 返回空 → 回退为 `text` | `textDocument/documentSymbol` 同步请求 → 提取中文符号名 |
 | `all` | 正则匹配 | 正则 + LSP symbols 合并去重 |
@@ -113,7 +129,7 @@ require('cmp_pinyin').setup({
 ### `notation` 可选值
 
 | 值 | 方案 |
-|----|------|
+| ---- | ------ |
 | `简拼` | 首字母（yh → 用户） |
 | `全拼` | 全拼（yonghu → 用户） |
 | `带声调全拼` | yong4hu4 → 用户 |
@@ -140,7 +156,7 @@ CLI 按数组顺序尝试每种方案，命中任意一种即返回结果。
 ### 补全行为
 
 | LSP SymbolKind | insertText | blink 图标 | 签名提示 |
-|----------------|-----------|-----------|---------|
+| ---------------- | ----------- | ----------- | --------- |
 | Function / Method / Constructor | `标识符名()` | 函数/方法/构造函数图标 | blink 的 `signatureHelp` 在 `()` 内自动触发 |
 | Variable / Class / Struct / 其他 | `标识符名` | 对应图标 | — |
 
