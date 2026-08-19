@@ -2,7 +2,6 @@ add_rules("mode.debug", "mode.release")
 set_encodings("utf-8")
 set_languages("cxxlatest")
 
-add_requires("spdlog")  -- 仅 demo target (pinyin) 使用
 
 -- ============ ib_pinyin 预编译库：首次构建自动拉取源码并用 cargo 编译 ============
 -- 来源: https://github.com/Chaoses-Ib/ib-matcher (ib-pinyin/bindings/c/README.md)
@@ -80,7 +79,6 @@ end
 -- 来源: https://github.com/Chaoses-Ib/ib-matcher.git
 target("pinyin")
     set_kind("binary")
-    add_packages("spdlog")
     setup_ib_pinyin()
     add_files("src/main.cpp", "src/pinyin.cpp")
 
