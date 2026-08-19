@@ -98,6 +98,8 @@ end
 
 --- blink.cmp completion provider entry point.
 function M:get_completions(ctx, callback)
+    -- blink v2 的 ctx 是 callable（ctx() 返回最新上下文 table）；v1 直接是 table
+    if type(ctx) == 'function' then ctx = ctx() end
     local query = get_query(ctx)
 
     if #query < (cmp_pinyin.config.min_query_len or 2) then
