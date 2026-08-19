@@ -34,7 +34,7 @@ xmake build cli
 
 ```lua
 {
-    'your/cmp_pinyin',   -- 替换为你的路径
+    'lyongji/pinyin_cmp',   -- GitHub: https://github.com/lyongji/pinyin_cmp
     build = 'xmake build cli',
     -- cli_path 自动检测，无需手动配置
 }
@@ -79,14 +79,22 @@ require('cmp_pinyin.blink_nodeps').setup({ notation = { '简拼', '全拼' } })
 ### Neovim 0.12 原生包管理
 
 ```lua
-vim.opt.rtp:prepend("E:/code/pinyin_cmp")
+-- 首次运行自动克隆到 pack 目录并加入 rtp（无需手动 clone / 设置 rtp）
+vim.pack.add({ 'https://github.com/lyongji/pinyin_cmp' })
+
 vim.schedule(function()
-  local ok, mod = pcall(require, 'cmp_pinyin')
-  if ok then
-    mod.setup({ notation = { '简拼', '全拼' } })
-  end
+    local ok, mod = pcall(require, 'cmp_pinyin')
+    if ok then
+        mod.setup({ notation = { '简拼', '全拼' } })
+    end
 end)
 ```
+
+> 插件目录 `bin/` 不入库（gitignore），首次安装后需在插件目录编译一次 CLI：
+>
+> ```bash
+> cd ~/.local/share/nvim/site/pack/core/opt/pinyin_cmp && xmake build cli
+> ```
 
 ## 可配置项
 
@@ -229,7 +237,8 @@ python test.py lua/cmp_pinyin/bin/cli # 指定 CLI
 
 ```
 lua/cmp_pinyin/
-  init.lua    — 核心模块（setup / LSP 标识符收集 / 文本词收集 / CLI 调用 / 上下文启发式检测）
-  blink.lua   — blink.cmp provider（get_completions / 上下文感知补全）
-  bin/        — 编译产物（xmake build 生成，gitignore）
+  init.lua        — 核心模块（setup / LSP 标识符收集 / 文本词收集 / CLI 调用 / 上下文启发式检测）
+  blink.lua       — blink.cmp provider（get_completions / 上下文感知补全）
+  blink_nodeps.lua — 无依赖入口（自动回退：blink → LSP → 纯文本）
+  bin/            — 编译产物（xmake build 生成，gitignore）
 ```
